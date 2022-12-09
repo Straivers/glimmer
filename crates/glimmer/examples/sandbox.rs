@@ -1,6 +1,7 @@
 use geometry::{Extent, Point};
 use shell::{
-    ButtonState, MouseButton, VirtualKeyCode, Window, WindowControl, WindowDesc, WindowHandler,
+    ButtonState, MouseButton, VirtualKeyCode, Window, WindowDesc, WindowFlags, WindowHandler,
+    WindowSpawner,
 };
 
 fn main() {
@@ -12,10 +13,7 @@ fn main() {
         min_size: None,
         max_size: None,
         position: None,
-        resizable: true,
-        visible: true,
-        transparent: false,
-        always_on_top: false,
+        flags: WindowFlags::VISIBLE | WindowFlags::RESIZABLE,
         handler: &mut |window| {
             println!("{}", f);
             AppWindow::new(window)
@@ -44,14 +42,14 @@ impl WindowHandler for AppWindow {
         // no-op
     }
 
-    fn on_close_request(&mut self, _control: &mut dyn WindowControl<Self>) -> bool {
+    fn on_close_request(&mut self, _control: &mut dyn WindowSpawner<Self>) -> bool {
         // always close the window opon request
         true
     }
 
     fn on_mouse_button(
         &mut self,
-        control: &mut dyn WindowControl<Self>,
+        control: &mut dyn WindowSpawner<Self>,
         button: MouseButton,
         state: ButtonState,
         _at: Point<i32>,
@@ -73,10 +71,7 @@ impl WindowHandler for AppWindow {
                         min_size: None,
                         max_size: None,
                         position: None,
-                        resizable: true,
-                        visible: true,
-                        transparent: false,
-                        always_on_top: false,
+                        flags: WindowFlags::VISIBLE | WindowFlags::RESIZABLE,
                         handler: &mut AppWindow::new,
                     });
                 }
@@ -85,13 +80,13 @@ impl WindowHandler for AppWindow {
         }
     }
 
-    fn on_cursor_move(&mut self, _control: &mut dyn WindowControl<Self>, _at: Point<i32>) {
+    fn on_cursor_move(&mut self, _control: &mut dyn WindowSpawner<Self>, _at: Point<i32>) {
         // no-op
     }
 
     fn on_key(
         &mut self,
-        control: &mut dyn WindowControl<Self>,
+        control: &mut dyn WindowSpawner<Self>,
         key: VirtualKeyCode,
         state: ButtonState,
     ) {
@@ -109,32 +104,33 @@ impl WindowHandler for AppWindow {
                         min_size: None,
                         max_size: None,
                         position: None,
-                        resizable: true,
-                        visible: true,
-                        transparent: false,
-                        always_on_top: false,
+                        flags: WindowFlags::VISIBLE | WindowFlags::RESIZABLE,
                         handler: &mut AppWindow::new,
                     });
                 }
             }
             _ => {}
         }
+
+        if let ButtonState::Repeated(count) = state {
+            println!("Key {:?} repeated {} times", key, count);
+        }
     }
 
-    fn on_resize(&mut self, _control: &mut dyn WindowControl<Self>, _inner_size: Extent<u32>) {
+    fn on_resize(&mut self, _control: &mut dyn WindowSpawner<Self>, _inner_size: Extent<u32>) {
         // no-op
     }
 
     fn on_rescale(
         &mut self,
-        _control: &mut dyn WindowControl<Self>,
+        _control: &mut dyn WindowSpawner<Self>,
         _scale_factor: f64,
         _new_inner_size: Extent<u32>,
     ) {
         // no-op
     }
 
-    fn on_redraw(&mut self, _control: &mut dyn WindowControl<Self>) {
+    fn on_redraw(&mut self, _control: &mut dyn WindowSpawner<Self>) {
         // no-op
     }
 }

@@ -1,4 +1,4 @@
-use geometry::{Extent, Point};
+use geometry::{Extent, Point, ScreenSpace};
 use shell::{
     ButtonState, MouseButton, VirtualKeyCode, Window, WindowDesc, WindowFlags, WindowHandler,
     WindowSpawner,
@@ -52,7 +52,7 @@ impl WindowHandler for AppWindow {
         control: &mut dyn WindowSpawner<Self>,
         button: MouseButton,
         state: ButtonState,
-        _at: Point<i32>,
+        _at: Point<i32, ScreenSpace>,
     ) {
         match button {
             MouseButton::Left => {
@@ -80,7 +80,11 @@ impl WindowHandler for AppWindow {
         }
     }
 
-    fn on_cursor_move(&mut self, _control: &mut dyn WindowSpawner<Self>, _at: Point<i32>) {
+    fn on_cursor_move(
+        &mut self,
+        _control: &mut dyn WindowSpawner<Self>,
+        _at: Point<i32, ScreenSpace>,
+    ) {
         // no-op
     }
 
@@ -117,7 +121,11 @@ impl WindowHandler for AppWindow {
         }
     }
 
-    fn on_resize(&mut self, _control: &mut dyn WindowSpawner<Self>, _inner_size: Extent<u32>) {
+    fn on_resize(
+        &mut self,
+        _control: &mut dyn WindowSpawner<Self>,
+        _inner_size: Extent<u32, ScreenSpace>,
+    ) {
         // no-op
     }
 
@@ -125,10 +133,12 @@ impl WindowHandler for AppWindow {
         &mut self,
         _control: &mut dyn WindowSpawner<Self>,
         _scale_factor: f64,
-        _new_inner_size: Extent<u32>,
+        _new_inner_size: Extent<u32, ScreenSpace>,
     ) {
         // no-op
     }
+
+    fn on_idle(&mut self, _spawner: &mut dyn WindowSpawner<Self>) {}
 
     fn on_redraw(&mut self, _control: &mut dyn WindowSpawner<Self>) {
         // no-op

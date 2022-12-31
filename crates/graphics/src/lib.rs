@@ -36,6 +36,7 @@
 
 use std::cell::RefCell;
 
+use geometry::Point;
 use raw_window_handle::HasRawWindowHandle;
 
 mod render_graph;
@@ -46,7 +47,48 @@ mod dx12;
 #[cfg(target_os = "windows")]
 use dx12 as platform;
 
-pub use render_graph::RenderGraph;
+pub use render_graph::{RenderGraph, RenderGraphNodeId};
+
+#[derive(Clone, Copy)]
+pub struct Color {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl Color {
+    pub const RED: Self = Self {
+        r: 1.0,
+        g: 0.0,
+        b: 0.0,
+        a: 1.0,
+    };
+
+    pub const GREEN: Self = Self {
+        r: 0.0,
+        g: 1.0,
+        b: 0.0,
+        a: 1.0,
+    };
+
+    pub const BLUE: Self = Self {
+        r: 0.0,
+        g: 0.0,
+        b: 1.0,
+        a: 1.0,
+    };
+
+    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self { r, g, b, a }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Vertex {
+    pub position: Point<f32>,
+    pub color: Color,
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum PowerPreference {

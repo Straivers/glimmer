@@ -4,17 +4,18 @@ use std::{
     rc::Rc,
 };
 
+use geometry::{Extent, ScreenSpace};
 use raw_window_handle::RawWindowHandle;
 use smallvec::SmallVec;
 use windows::{
     s,
     Win32::{
-        Foundation::HWND,
-        Graphics::{Direct3D12::*, Dxgi::Common::*},
+        Foundation::{HWND, RECT},
+        Graphics::{Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, Direct3D12::*, Dxgi::Common::*},
     },
 };
 
-use crate::{render_graph::RenderGraph, GraphicsConfig, Vertex};
+use crate::{render_graph::RenderGraph, GraphicsConfig, RenderGraphNodeId, Vertex};
 
 mod dx;
 mod graphics;
@@ -133,7 +134,7 @@ impl GraphicsContext {
     pub fn draw(&mut self, target: &Image, content: &RenderGraph) {
         let frame = self.begin_frame();
 
-        let frame_marker = {
+        let (frame_marker, imm_vertex_view, imm_index_view) = {
             let mut frame_alloc = self.upload_allocator.begin_frame();
 
             let vertex_memory = frame_alloc
@@ -145,11 +146,20 @@ impl GraphicsContext {
 
             unsafe {
                 std::slice::from_raw_parts_mut(
-                    self.upload_ptr.add(vertex_memory.offset as usize).cast(),
+                    self.upload_ptr
+                        .add(vertex_memory.heap_offset as usize)
+                        .cast(),
                     content.imm_vertices.len(),
                 )
                 .copy_from_slice(&content.imm_vertices);
             }
+
+            let vertex_view = D3D12_VERTEX_BUFFER_VIEW {
+                BufferLocation: unsafe { self.upload_buffer.GetGPUVirtualAddress() }
+                    + vertex_memory.heap_offset,
+                SizeInBytes: vertex_memory.size as u32,
+                StrideInBytes: std::mem::size_of::<Vertex>() as u32,
+            };
 
             let index_memory = frame_alloc
                 .allocate(
@@ -160,13 +170,22 @@ impl GraphicsContext {
 
             unsafe {
                 std::slice::from_raw_parts_mut(
-                    self.upload_ptr.add(index_memory.offset as usize).cast(),
+                    self.upload_ptr
+                        .add(index_memory.heap_offset as usize)
+                        .cast(),
                     content.imm_indices.len(),
                 )
                 .copy_from_slice(&content.imm_indices);
             }
 
-            frame_alloc.finish()
+            let index_view = D3D12_INDEX_BUFFER_VIEW {
+                BufferLocation: unsafe { self.upload_buffer.GetGPUVirtualAddress() }
+                    + index_memory.heap_offset,
+                SizeInBytes: index_memory.size as u32,
+                Format: DXGI_FORMAT_R16_UINT,
+            };
+
+            (frame_alloc.finish(), vertex_view, index_view)
         };
 
         unsafe {
@@ -176,23 +195,55 @@ impl GraphicsContext {
                 D3D12_RESOURCE_STATE_RENDER_TARGET,
             )]);
 
+            frame
+                .command_list
+                .OMSetRenderTargets(1, Some(&target.rtv), false, None);
+
             frame.command_list.ClearRenderTargetView(
                 target.rtv,
                 [0.5, 0.5, 0.5, 1.0].as_ptr(),
                 &[],
             );
 
-            // record draw commands!
+            let target_desc = target.resource.GetDesc();
 
-            // upload render graph immediate geometry
+            let constants =
+                ShaderConstants::new(Extent::new(target_desc.Width as u32, target_desc.Height));
 
-            // draw
+            frame.command_list.RSSetViewports(&[D3D12_VIEWPORT {
+                TopLeftX: 0.0,
+                TopLeftY: 0.0,
+                Width: constants.viewport.width as _,
+                Height: constants.viewport.height as _,
+                MinDepth: 0.0,
+                MaxDepth: 1.0,
+            }]);
+
+            frame.command_list.RSSetScissorRects(&[RECT {
+                left: 0,
+                top: 0,
+                right: constants.viewport.width as _,
+                bottom: constants.viewport.height as _,
+            }]);
+
+            self.record_render_graph(
+                &frame.command_list,
+                content,
+                RenderGraphNodeId::root(),
+                &constants,
+                &imm_vertex_view,
+                &imm_index_view,
+            );
 
             frame.command_list.ResourceBarrier(&[transition_barrier(
                 &target.resource,
                 D3D12_RESOURCE_STATE_RENDER_TARGET,
                 D3D12_RESOURCE_STATE_PRESENT,
             )]);
+        }
+
+        unsafe {
+            self.dx.device.GetDeviceRemovedReason().unwrap();
         }
 
         let fence_value = self.submit_frame(frame, frame_marker);
@@ -278,6 +329,49 @@ impl GraphicsContext {
             }
         }
     }
+
+    fn record_render_graph(
+        &self,
+        command_list: &ID3D12GraphicsCommandList,
+        content: &RenderGraph,
+        node: RenderGraphNodeId,
+        constants: &ShaderConstants,
+        imm_vertex_view: &D3D12_VERTEX_BUFFER_VIEW,
+        imm_index_view: &D3D12_INDEX_BUFFER_VIEW,
+    ) {
+        use crate::render_graph::RenderGraphCommand;
+
+        match content.get(node) {
+            RenderGraphCommand::Root => assert_eq!(node, RenderGraphNodeId::root()),
+            RenderGraphCommand::DrawImmediate {
+                first_index,
+                num_indices,
+            } => unsafe {
+                self.ui_shader.bind(command_list, constants);
+                command_list.IASetVertexBuffers(0, Some(&[*imm_vertex_view]));
+                command_list.IASetIndexBuffer(Some(imm_index_view));
+
+                command_list.DrawIndexedInstanced(
+                    *num_indices as u32,
+                    1,
+                    *first_index as u32,
+                    0,
+                    0,
+                );
+            },
+        }
+
+        for child in content.iter_children(node) {
+            self.record_render_graph(
+                command_list,
+                content,
+                child,
+                constants,
+                imm_vertex_view,
+                imm_index_view,
+            );
+        }
+    }
 }
 
 impl Drop for GraphicsContext {
@@ -311,6 +405,27 @@ fn transition_barrier(
     }
 }
 
+struct ShaderConstants {
+    viewport: Extent<u32, ScreenSpace>,
+}
+
+impl ShaderConstants {
+    fn new(viewport: Extent<u32, ScreenSpace>) -> Self {
+        Self { viewport }
+    }
+
+    fn write(&self, command_list: &ID3D12GraphicsCommandList) {
+        unsafe {
+            command_list.SetGraphicsRoot32BitConstants(
+                0,
+                2,
+                [self.viewport.width, self.viewport.height].as_ptr().cast(),
+                0,
+            );
+        }
+    }
+}
+
 struct UiShader {
     root_signature: ID3D12RootSignature,
     pipeline_state: ID3D12PipelineState,
@@ -337,7 +452,7 @@ impl UiShader {
             D3D12_INPUT_ELEMENT_DESC {
                 SemanticName: s!("COLOR\0"),
                 SemanticIndex: 0,
-                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
                 InputSlot: 0,
                 AlignedByteOffset: D3D12_APPEND_ALIGNED_ELEMENT,
                 InputSlotClass: D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
@@ -360,7 +475,7 @@ impl UiShader {
         };
 
         let mut render_target_formats = [DXGI_FORMAT_UNKNOWN; 8];
-        render_target_formats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        render_target_formats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
         let pipeline_info = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
             pRootSignature: windows::core::ManuallyDrop::new(&root_signature),
@@ -381,7 +496,7 @@ impl UiShader {
             RasterizerState: D3D12_RASTERIZER_DESC {
                 FillMode: D3D12_FILL_MODE_SOLID,
                 CullMode: D3D12_CULL_MODE_BACK,
-                FrontCounterClockwise: true.into(),
+                FrontCounterClockwise: false.into(),
                 DepthBias: 0,
                 DepthBiasClamp: 0.0,
                 SlopeScaledDepthBias: 0.0,
@@ -434,5 +549,14 @@ impl UiShader {
             root_signature,
             pipeline_state,
         }
+    }
+
+    fn bind(&self, command_list: &ID3D12GraphicsCommandList, constants: &ShaderConstants) {
+        unsafe {
+            command_list.SetPipelineState(&self.pipeline_state);
+            command_list.SetGraphicsRootSignature(&self.root_signature);
+            command_list.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        }
+        constants.write(command_list);
     }
 }

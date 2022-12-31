@@ -26,17 +26,17 @@ impl<'a> FrameAllocator<'a> {
     ///
     /// If the request returns `Error::OutOfMemory`,
     pub fn allocate(&mut self, size: u64, alignment: u64) -> Result<Allocation, Error> {
+        enum Adjust {
+            Align,
+            Wrap,
+        }
+
         let tail_ptr = self.allocator.bytes_freed % self.allocator.capacity;
         let base_ptr = self.bytes_allocated % self.allocator.capacity;
         let aligned_ptr = next_multiple_of(base_ptr, alignment);
 
         if size > self.allocator.capacity {
             return Err(Error::InsufficientCapacity);
-        }
-
-        enum Adjust {
-            Align,
-            Wrap,
         }
 
         let adjust_amount = match tail_ptr.cmp(&base_ptr) {
@@ -136,10 +136,6 @@ impl Allocator {
             bytes_freed: 0,
             bytes_allocated: 0,
         }
-    }
-
-    pub fn bytes_free(&self) -> u64 {
-        self.capacity - (self.bytes_allocated - self.bytes_freed)
     }
 
     pub fn begin_frame(&mut self) -> FrameAllocator {

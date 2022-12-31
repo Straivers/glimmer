@@ -7,6 +7,7 @@ use std::{
 use geometry::{Extent, ScreenSpace};
 use raw_window_handle::RawWindowHandle;
 use smallvec::SmallVec;
+#[allow(clippy::wildcard_imports)]
 use windows::{
     s,
     Win32::{
@@ -34,8 +35,8 @@ struct Frame {
 
 struct FrameInFlight {
     frame: Frame,
-    frame_marker: FrameMarker,
     fence_value: u64,
+    alloc_marker: FrameMarker,
 }
 
 pub struct GraphicsContext {
@@ -222,8 +223,8 @@ impl GraphicsContext {
             frame.command_list.RSSetScissorRects(&[RECT {
                 left: 0,
                 top: 0,
-                right: constants.viewport.width as _,
-                bottom: constants.viewport.height as _,
+                right: constants.viewport.width.try_into().unwrap(),
+                bottom: constants.viewport.height.try_into().unwrap(),
             }]);
 
             self.record_render_graph(
@@ -279,7 +280,7 @@ impl GraphicsContext {
         })
     }
 
-    fn submit_frame(&mut self, frame: Frame, frame_marker: FrameMarker) -> u64 {
+    fn submit_frame(&mut self, frame: Frame, alloc_marker: FrameMarker) -> u64 {
         let mut graphics = self.graphics_queue.borrow_mut();
 
         let fence_value = graphics.submit(&frame.command_list);
@@ -287,7 +288,7 @@ impl GraphicsContext {
         self.frames_in_flight.push_back(FrameInFlight {
             frame,
             fence_value,
-            frame_marker,
+            alloc_marker,
         });
 
         fence_value
@@ -307,7 +308,7 @@ impl GraphicsContext {
 
         for FrameInFlight {
             mut frame,
-            frame_marker,
+            alloc_marker: frame_marker,
             ..
         } in self.frames_in_flight.drain(..i)
         {
@@ -352,9 +353,9 @@ impl GraphicsContext {
                 command_list.IASetIndexBuffer(Some(imm_index_view));
 
                 command_list.DrawIndexedInstanced(
-                    *num_indices as u32,
+                    u32::from(*num_indices),
                     1,
-                    *first_index as u32,
+                    u32::from(*first_index),
                     0,
                     0,
                 );
@@ -435,6 +436,7 @@ impl UiShader {
     const UI_VERTEX_SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ui_vs.cso"));
     const UI_PIXEL_SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ui_ps.cso"));
 
+    #[allow(clippy::too_many_lines)]
     fn new(dx: &dx::Interfaces) -> Self {
         let root_signature =
             unsafe { dx.device.CreateRootSignature(0, Self::UI_VERTEX_SHADER) }.unwrap();
@@ -460,7 +462,7 @@ impl UiShader {
             },
         ];
 
-        let mut blend_targets = [Default::default(); 8];
+        let mut blend_targets = [D3D12_RENDER_TARGET_BLEND_DESC::default(); 8];
         blend_targets[0] = D3D12_RENDER_TARGET_BLEND_DESC {
             BlendEnable: true.into(),
             LogicOpEnable: false.into(),
@@ -511,8 +513,8 @@ impl UiShader {
                 DepthWriteMask: D3D12_DEPTH_WRITE_MASK_ALL,
                 DepthFunc: D3D12_COMPARISON_FUNC_LESS,
                 StencilEnable: false.into(),
-                StencilReadMask: D3D12_DEFAULT_STENCIL_READ_MASK as u8,
-                StencilWriteMask: D3D12_DEFAULT_STENCIL_WRITE_MASK as u8,
+                StencilReadMask: 0xFF,
+                StencilWriteMask: 0xFF,
                 FrontFace: D3D12_DEPTH_STENCILOP_DESC {
                     StencilFailOp: D3D12_STENCIL_OP_KEEP,
                     StencilDepthFailOp: D3D12_STENCIL_OP_KEEP,
@@ -528,7 +530,7 @@ impl UiShader {
             },
             InputLayout: D3D12_INPUT_LAYOUT_DESC {
                 pInputElementDescs: input_elements.as_ptr(),
-                NumElements: input_elements.len() as _,
+                NumElements: u32::try_from(input_elements.len()).unwrap(),
             },
             PrimitiveTopologyType: D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
             NumRenderTargets: 1,

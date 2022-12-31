@@ -1,5 +1,6 @@
 use crate::Vertex;
 
+#[allow(clippy::module_name_repetitions)]
 #[repr(u16)]
 pub enum RenderGraphCommand {
     Root,
@@ -13,12 +14,14 @@ struct RenderGraphNode {
     command: RenderGraphCommand,
 }
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RenderGraphNodeId {
     index: u16,
 }
 
 impl RenderGraphNodeId {
+    #[must_use]
     pub const fn root() -> Self {
         Self { index: 0 }
     }
@@ -46,10 +49,12 @@ impl Default for RenderGraph {
 }
 
 impl RenderGraph {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn get(&self, node: RenderGraphNodeId) -> &RenderGraphCommand {
         &self.nodes[node.index as usize].command
     }
@@ -88,6 +93,10 @@ impl RenderGraph {
     /// Embeds the given mesh into the render graph for drawing. Use this for
     /// small meshes that change frequently (every frame or thereabouts), such
     /// as UI elements.
+    ///
+    /// ## Panics
+    ///
+    /// May panic if the number of vertices exceeds `u16::MAX`.
     pub fn draw_immediate(
         &mut self,
         parent: RenderGraphNodeId,

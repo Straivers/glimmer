@@ -79,6 +79,7 @@ impl Color {
         a: 1.0,
     };
 
+    #[must_use]
     pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
     }
@@ -111,12 +112,14 @@ pub struct GraphicsContext {
 }
 
 impl GraphicsContext {
+    #[must_use]
     pub fn new(config: &GraphicsConfig) -> Self {
         Self {
             inner: RefCell::new(platform::GraphicsContext::new(config)),
         }
     }
 
+    #[must_use]
     pub fn create_surface(&self, window: impl HasRawWindowHandle) -> Surface {
         Surface {
             inner: self
@@ -146,7 +149,7 @@ impl Surface {
     }
 
     pub fn resize(&mut self) {
-        self.inner.resize()
+        self.inner.resize();
     }
 }
 
@@ -157,12 +160,13 @@ pub struct SurfaceImage<'a> {
 impl<'a> SurfaceImage<'a> {
     /// Presents the swapchain image to the surface.
     pub fn present(self) {
-        self.inner.present()
+        self.inner.present();
     }
 
+    #[must_use]
     pub fn image(&self) -> &Image {
         // This is safe as long as Image remains repr(transparent).
-        unsafe { std::mem::transmute(self.inner.get_image()) }
+        unsafe { &*((self.inner.get_image() as *const dx12::Image).cast()) }
     }
 }
 
